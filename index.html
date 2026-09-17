@@ -375,7 +375,7 @@
         </div>
     </div>
 
-    <!-- Saldi Totali Accumulati con Funzioni di Backup e Ripristino Manuale -->
+    <!-- Saldi Totali Accumulati con Funzioni di Esportazione e Ripristino Manuale -->
     <div class="card" style="margin-bottom: 16px;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid var(--border); padding-bottom: 8px; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
             <div>
@@ -522,59 +522,52 @@
         'Luglio', 'Agosto', 'Settembre', 'Ottobre', 'Novembre', 'Dicembre'
     ];
 
+    function toggleTema() {
+        const html = document.documentElement;
+        const currentTheme = html.getAttribute('data-theme');
+        const newTheme = currentTheme === 'light' ? 'dark' : 'light';
+        html.setAttribute('data-theme', newTheme);
+        document.getElementById('themeIcon').innerText = newTheme === 'light' ? '🌙' : '☀️';
+        document.getElementById('themeText').innerText = newTheme === 'light' ? 'Tema Scuro' : 'Tema Chiaro';
+    }
+
     function popolaSelettoreMeseManuale() {
         const sel = document.getElementById('inputMeseManuale');
         if (!sel) return;
-        
-        const valoreSelezionatoPrecedente = sel.value;
+        const valPrec = sel.value;
         sel.innerHTML = '';
 
-        const startYear = 2026;
-        const startMonth = 7;
-
         const oggi = new Date();
-        const endYear = oggi.getFullYear();
-        const endMonth = oggi.getMonth() + 1;
+        let y = 2026, m = 7;
+        let endY = oggi.getFullYear(), endM = oggi.getMonth() + 1;
 
-        let y = startYear;
-        let m = startMonth;
-
-        while (y < endYear || (y === endYear && m <= endMonth)) {
-            const mStr = String(m).padStart(2, '0');
-            const val = `${y}-${mStr}`;
+        while (y < endY || (y === endY && m <= endM)) {
+            const val = `${y}-${String(m).padStart(2, '0')}`;
             const opt = document.createElement('option');
             opt.value = val;
             opt.innerText = `${NOMI_MESI[m - 1]} ${y}`;
             sel.appendChild(opt);
-
             m++;
-            if (m > 12) {
-                m = 1;
-                y++;
-            }
+            if (m > 12) { m = 1; y++; }
         }
 
-        if (valoreSelezionatoPrecedente && Array.from(sel.options).some(o => o.value === valoreSelezionatoPrecedente)) {
-            sel.value = valoreSelezionatoPrecedente;
+        if (valPrec && Array.from(sel.options).some(o => o.value === valPrec)) {
+            sel.value = valPrec;
         } else if (sel.options.length > 0) {
             sel.value = sel.options[sel.options.length - 1].value;
         }
-
         caricaValoriMeseSelezionato();
     }
 
     function caricaValoriMeseSelezionato() {
         const sel = document.getElementById('inputMeseManuale');
         if (!sel) return;
-        const meseInput = sel.value;
-        if (!meseInput) return;
-
-        let row = dati.find(d => d.mese === meseInput);
+        let row = dati.find(d => d.mese === sel.value);
         if (row) {
-            document.getElementById('inputFerieManuali').value = row.ferieMaturate !== undefined ? row.ferieMaturate : 14.66;
-            document.getElementById('inputRolManuali').value = row.rolMaturati !== undefined ? row.rolMaturati : 3.33;
-            document.getElementById('inputExFestManuali').value = row.exFestMaturate !== undefined ? row.exFestMaturate : 2.67;
-            document.getElementById('inputTicketManuali').value = row.ticketMaturati !== undefined ? row.ticketMaturati : 0;
+            document.getElementById('inputFerieManuali').value = row.ferieMaturate ?? 14.66;
+            document.getElementById('inputRolManuali').value = row.rolMaturati ?? 3.33;
+            document.getElementById('inputExFestManuali').value = row.exFestMaturate ?? 2.67;
+            document.getElementById('inputTicketManuali').value = row.ticketMaturati ?? 0;
         } else {
             document.getElementById('inputFerieManuali').value = 14.66;
             document.getElementById('inputRolManuali').value = 3.33;
@@ -583,18 +576,13 @@
         }
     }
 
-    function calcolaGiorniLavorativi(dataInizioStr, dataFineStr) {
-        let d1 = new Date(dataInizioStr);
-        let d2 = new Date(dataFineStr);
+    function calcolaGiorniLavorativi(dInizio, dFine) {
+        let d1 = new Date(dInizio), d2 = new Date(dFine);
         if (isNaN(d1) || isNaN(d2) || d2 < d1) return 0;
-
-        let count = 0;
-        let cur = new Date(d1);
+        let count = 0, cur = new Date(d1);
         while (cur <= d2) {
-            const dayOfWeek = cur.getDay();
-            if (dayOfWeek !== 0 && dayOfWeek !== 6) {
-                count++;
-            }
+            let day = cur.getDay();
+            if (day !== 0 && day !== 6) count++;
             cur.setDate(cur.getDate() + 1);
         }
         return count;
@@ -620,23 +608,316 @@
         } catch(e) {}
     }
 
-    function esportaBackup() {
-        const backupData = {
-            dati: dati,
-            ferieLog: ferieLog,
-            malattieLog: malattieLog,
-            ticketLog: ticketLog,
-            dataExport: new Date().toISOString()
-        };
+    function sincronizzaAccreditiMensiliAutomatici() {
+        const oggi = new Date();
+        const annoOggi = oggi.getFullYear();
+        const meseOggi = oggi.getMonth() + 1;
 
+        let [startAnno, startMese] = MESE_INIZIO_DEFAULT.split('-').map(Number);
+        let curAnno = startAnno, curMese = startMese;
+
+        while (curAnno < annoOggi || (curAnno === annoOggi && curMese <= meseOggi)) {
+            const meseStr = `${curAnno}-${String(curMese).padStart(2, '0')}`;
+            if (!dati.some(d => d.mese === meseStr)) {
+                dati.push({
+                    mese: meseStr,
+                    ferieMaturate: 14.66,
+                    feriePrese: 0,
+                    rolMaturati: 3.33,
+                    rolPresi: 0,
+                    exFestMaturate: 2.67,
+                    exFestPrese: 0,
+                    ticketMaturati: 0,
+                    ticketSpesi: 0
+                });
+            }
+            curMese++;
+            if (curMese > 12) { curMese = 1; curAnno++; }
+        }
+        dati.sort((a, b) => a.mese.localeCompare(b.mese));
+    }
+
+    function ricalcolaTutto() {
+        dati.forEach(d => {
+            d.feriePrese = 0;
+            d.rolPresi = 0;
+            d.exFestPrese = 0;
+            d.ticketSpesi = 0;
+        });
+
+        ferieLog.forEach(f => {
+            let mStr = f.dataInizio.substring(0, 7);
+            let row = dati.find(d => d.mese === mStr);
+            if (!row) {
+                row = { mese: mStr, ferieMaturate: 14.66, feriePrese: 0, rolMaturati: 3.33, rolPresi: 0, exFestMaturate: 2.67, exFestPrese: 0, ticketMaturati: 0, ticketSpesi: 0 };
+                dati.push(row);
+            }
+            if (f.tipo === 'FERIE') row.feriePrese += f.oreTotali;
+            if (f.tipo === 'ROL') row.rolPresi += f.oreTotali;
+            if (f.tipo === 'EX_FEST') row.exFestPrese += f.oreTotali;
+        });
+
+        ticketLog.forEach(t => {
+            let row = dati.find(d => d.mese === t.meseRif);
+            if (row) row.ticketSpesi += t.quantita;
+        });
+
+        dati.sort((a, b) => a.mese.localeCompare(b.mese));
+        salvaTuttiDati();
+    }
+
+    function render() {
+        ricalcolaTutto();
+        popolaSelettoreMeseManuale();
+        aggiornaSelettoriMese();
+
+        // Saldi Totali
+        let totMatFerie = 0, totPresFerie = 0;
+        let totMatRol = 0, totPresRol = 0;
+        let totMatExFest = 0, totPresExFest = 0;
+        let totMatTicket = 0, totSpesiTicket = 0;
+        let totMalattiaGg = 0;
+
+        dati.forEach(d => {
+            totMatFerie += d.ferieMaturate;
+            totPresFerie += d.feriePrese;
+            totMatRol += d.rolMaturati;
+            totPresRol += d.rolPresi;
+            totMatExFest += d.exFestMaturate;
+            totPresExFest += d.exFestPrese;
+            totMatTicket += d.ticketMaturati;
+            totSpesiTicket += d.ticketSpesi;
+        });
+
+        malattieLog.forEach(m => totMalattiaGg += m.giorniLavorativi);
+
+        document.getElementById('sumFerie').innerText = (totMatFerie - totPresFerie).toFixed(2) + ' h';
+        document.getElementById('sumRol').innerText = (totMatRol - totPresRol).toFixed(2) + ' h';
+        document.getElementById('sumExFest').innerText = (totMatExFest - totPresExFest).toFixed(2) + ' h';
+        document.getElementById('sumTicketMaturati').innerText = totMatTicket;
+        document.getElementById('sumTicket').innerText = (totMatTicket - totSpesiTicket);
+        document.getElementById('sumMalattia').innerText = totMalattiaGg + ' gg';
+
+        // Tabella Ferie Log
+        let htmlFerie = '';
+        ferieLog.forEach((f, idx) => {
+            let badgeClass = f.tipo === 'FERIE' ? 'badge-ferie' : (f.tipo === 'ROL' ? 'badge-rol' : 'badge-exfest');
+            htmlFerie += `<tr>
+                <td><span class="badge ${badgeClass}">${f.tipo}</span></td>
+                <td>${f.dataInizio} / ${f.dataFine}</td>
+                <td>${f.giorniLavorativi}</td>
+                <td>${f.oreTotali.toFixed(2)} h</td>
+                <td>${f.note || ''}</td>
+                <td>
+                    <button class="btn-del" onclick="eliminaFerie(${idx})">Elimina</button>
+                </td>
+            </tr>`;
+        });
+        document.getElementById('tabellaFerieCorpo').innerHTML = htmlFerie || '<tr><td colspan="6">Nessuna assenza registrata</td></tr>';
+
+        // Tabella Malattie Log
+        let htmlMalattie = '';
+        malattieLog.forEach((m, idx) => {
+            htmlMalattie += `<tr>
+                <td>${m.dataInizio} / ${m.dataFine}</td>
+                <td>${m.giorniLavorativi}</td>
+                <td>${formattaMeseAnno(m.dataInizio.substring(0, 7))}</td>
+                <td>${m.note || ''}</td>
+                <td>
+                    <button class="btn-del" onclick="eliminaMalattia(${idx})">Elimina</button>
+                </td>
+            </tr>`;
+        });
+        document.getElementById('tabellaMalattieCorpo').innerHTML = htmlMalattie || '<tr><td colspan="5">Nessuna malattia registrata</td></tr>';
+
+        // Tabella Ticket Log
+        let htmlTicket = '';
+        ticketLog.forEach((t, idx) => {
+            htmlTicket += `<tr>
+                <td>${t.dataEsatta}</td>
+                <td>${formattaMeseAnno(t.meseRif)}</td>
+                <td>${t.quantita}</td>
+                <td>${t.note || ''}</td>
+                <td>
+                    <button class="btn-del" onclick="eliminaTicket(${idx})">Elimina</button>
+                </td>
+            </tr>`;
+        });
+        document.getElementById('tabellaTicketCorpo').innerHTML = htmlTicket || '<tr><td colspan="5">Nessun ticket speso registrato</td></tr>';
+
+        // Tabella Prospetto Mensile
+        let htmlProspetto = '';
+        dati.forEach((d, idx) => {
+            let totF = d.ferieMaturate - d.feriePrese;
+            let totR = d.rolMaturati - d.rolPresi;
+            let totE = d.exFestMaturate - d.exFestPrese;
+            let totT = d.ticketMaturati - d.ticketSpesi;
+            let ggMalMese = malattieLog.filter(m => m.dataInizio.substring(0, 7) === d.mese).reduce((acc, curr) => acc + curr.giorniLavorativi, 0);
+
+            htmlProspetto += `<tr>
+                <td><strong>${formattaMeseAnno(d.mese)}</strong></td>
+                <td><input type="number" step="0.01" class="table-input" id="fm_${idx}" value="${d.ferieMaturate}"></td>
+                <td>${d.feriePrese.toFixed(2)}</td>
+                <td class="highlight">${totF.toFixed(2)}</td>
+                <td><input type="number" step="0.01" class="table-input" id="rm_${idx}" value="${d.rolMaturati}"></td>
+                <td>${d.rolPresi.toFixed(2)}</td>
+                <td class="highlight">${totR.toFixed(2)}</td>
+                <td><input type="number" step="0.01" class="table-input" id="em_${idx}" value="${d.exFestMaturate}"></td>
+                <td>${d.exFestPrese.toFixed(2)}</td>
+                <td class="highlight">${totE.toFixed(2)}</td>
+                <td><input type="number" class="table-input" id="tm_${idx}" value="${d.ticketMaturati}"></td>
+                <td>${d.ticketSpesi}</td>
+                <td class="highlight">${totT}</td>
+                <td>${ggMalMese}</td>
+                <td>${ggMalMese} gg</td>
+                <td><button class="btn-del" onclick="eliminaMeseProspetto(${idx})">Elimina</button></td>
+            </tr>`;
+        });
+        document.getElementById('tabellaCorpo').innerHTML = htmlProspetto || '<tr><td colspan="16">Nessun mese registrato</td></tr>';
+    }
+
+    function aggiungiMeseManuale() {
+        const mese = document.getElementById('inputMeseManuale').value;
+        const fMat = parseFloat(document.getElementById('inputFerieManuali').value) || 0;
+        const rMat = parseFloat(document.getElementById('inputRolManuali').value) || 0;
+        const eMat = parseFloat(document.getElementById('inputExFestManuali').value) || 0;
+        const tMat = parseInt(document.getElementById('inputTicketManuali').value) || 0;
+
+        let row = dati.find(d => d.mese === mese);
+        if (row) {
+            row.ferieMaturate = fMat;
+            row.rolMaturati = rMat;
+            row.exFestMaturate = eMat;
+            row.ticketMaturati = tMat;
+        } else {
+            dati.push({
+                mese: mese,
+                ferieMaturate: fMat,
+                feriePrese: 0,
+                rolMaturati: rMat,
+                rolPresi: 0,
+                exFestMaturate: eMat,
+                exFestPrese: 0,
+                ticketMaturati: tMat,
+                ticketSpesi: 0
+            });
+        }
+        render();
+        alert("Mese aggiornato con successo!");
+    }
+
+    function aggiungiFerie() {
+        const tipo = document.getElementById('inputTipoAssenza').value;
+        const dInizio = document.getElementById('inputFerieDataInizio').value;
+        const dFine = document.getElementById('inputFerieDataFine').value;
+        const oreGiorno = parseFloat(document.getElementById('inputFerieOreGiorno').value) || 8;
+        const note = document.getElementById('inputFerieNote').value;
+
+        if (!dInizio || !dFine) {
+            alert("Inserisci data inizio e fine.");
+            return;
+        }
+
+        let ggLavorativi = calcolaGiorniLavorativi(dInizio, dFine);
+        let oreTotali = ggLavorativi * oreGiorno;
+
+        ferieLog.push({ tipo, dataInizio: dInizio, dataFine: dFine, giorniLavorativi: ggLavorativi, oreTotali, note });
+        render();
+        alert("Assenza inserita correttamente!");
+    }
+
+    function aggiungiMalattia() {
+        const dInizio = document.getElementById('inputMalattiaDataInizio').value;
+        const dFine = document.getElementById('inputMalattiaDataFine').value;
+        const note = document.getElementById('inputMalattiaNote').value;
+
+        if (!dInizio || !dFine) {
+            alert("Inserisci data inizio e fine malattia.");
+            return;
+        }
+
+        let ggLavorativi = calcolaGiorniLavorativi(dInizio, dFine);
+        malattieLog.push({ dataInizio: dInizio, dataFine: dFine, giorniLavorativi: ggLavorativi, note });
+        render();
+        alert("Malattia inserita correttamente!");
+    }
+
+    function aggiornaMeseDaData(dataStr) {
+        if (!dataStr) return;
+        let mStr = dataStr.substring(0, 7);
+        let sel = document.getElementById('selectMeseSpesaTicket');
+        if (sel && Array.from(sel.options).some(o => o.value === mStr)) {
+            sel.value = mStr;
+        }
+    }
+
+    function aggiungiTicketSpeso() {
+        const dataEsatta = document.getElementById('inputTicketData').value;
+        const meseRif = document.getElementById('selectMeseSpesaTicket').value;
+        const quantita = parseInt(document.getElementById('inputTicketQuantita').value) || 1;
+        const note = document.getElementById('inputTicketNote').value;
+
+        if (!dataEsatta || !meseRif) {
+            alert("Compila i campi obbligatori per il ticket.");
+            return;
+        }
+
+        ticketLog.push({ dataEsatta, meseRif, quantita, note });
+        render();
+        alert("Ticket speso registrato!");
+    }
+
+    function confermaEAggiornaModifiche() {
+        dati.forEach((d, idx) => {
+            let fm = document.getElementById(`fm_${idx}`);
+            let rm = document.getElementById(`rm_${idx}`);
+            let em = document.getElementById(`em_${idx}`);
+            let tm = document.getElementById(`tm_${idx}`);
+
+            if (fm) d.ferieMaturate = parseFloat(fm.value) || 0;
+            if (rm) d.rolMaturati = parseFloat(rm.value) || 0;
+            if (em) d.exFestMaturate = parseFloat(em.value) || 0;
+            if (tm) d.ticketMaturati = parseInt(tm.value) || 0;
+        });
+        render();
+        alert("Modifiche salvate e prospetto ricalcolato!");
+    }
+
+    function eliminaFerie(idx) {
+        if (confirm("Eliminare questa assenza?")) {
+            ferieLog.splice(idx, 1);
+            render();
+        }
+    }
+
+    function eliminaMalattia(idx) {
+        if (confirm("Eliminare questa malattia?")) {
+            malattieLog.splice(idx, 1);
+            render();
+        }
+    }
+
+    function eliminaTicket(idx) {
+        if (confirm("Eliminare questo ticket speso?")) {
+            ticketLog.splice(idx, 1);
+            render();
+        }
+    }
+
+    function eliminaMeseProspetto(idx) {
+        if (confirm("Eliminare questo mese dal prospetto?")) {
+            dati.splice(idx, 1);
+            render();
+        }
+    }
+
+    function esportaBackup() {
+        const backupData = { dati, ferieLog, malattieLog, ticketLog, dataExport: new Date().toISOString() };
         const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: "application/json" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
-        
-        const oraStr = new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19);
-        
         a.href = url;
-        a.download = `backup_gestione_ferie_${oraStr}.json`;
+        a.download = `backup_gestione_ferie_${new Date().toISOString().substring(0, 10)}.json`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -650,116 +931,67 @@
     function ripristinaBackup(event) {
         const file = event.target.files[0];
         if (!file) return;
-
         const reader = new FileReader();
         reader.onload = function(e) {
             try {
                 const imported = JSON.parse(e.target.result);
-                if (imported && (imported.dati || imported.ferieLog || imported.malattieLog || imported.ticketLog)) {
-                    if (confirm("Sei sicuro di voler ripristinare i dati da questo file? Tutti i dati attuali verranno sovrascritti.")) {
+                if (imported && imported.dati) {
+                    if (confirm("Ripristinare i dati dal file? I dati attuali verranno sovrascritti.")) {
                         dati = imported.dati || [];
                         ferieLog = imported.ferieLog || [];
                         malattieLog = imported.malattieLog || [];
                         ticketLog = imported.ticketLog || [];
-
                         salvaTuttiDati();
                         render();
-                        alert("Dati ripristinati con successo dal file!");
+                        alert("Backup ripristinato con successo!");
                     }
                 } else {
-                    alert("Il file selezionato non sembra essere un backup valido.");
+                    alert("File non valido.");
                 }
             } catch (err) {
-                alert("Errore durante la lettura del file: formato JSON non valido.");
+                alert("Errore nella lettura del file JSON.");
             }
         };
         reader.readAsText(file);
         event.target.value = '';
     }
 
-    function sincronizzaAccreditiMensiliAutomatici() {
-        if (dati.length === 0) {
-            const oggi = new Date();
-            const annoOggi = oggi.getFullYear();
-            const meseOggi = oggi.getMonth() + 1;
-
-            let [startAnno, startMese] = MESE_INIZIO_DEFAULT.split('-').map(Number);
-            let curAnno = startAnno;
-            let curMese = startMese;
-
-            while (curAnno < annoOggi || (curAnno === annoOggi && curMese <= meseOggi)) {
-                const meseStr = `${curAnno}-${String(curMese).padStart(2, '0')}`;
-                dati.push({
-                    mese: meseStr,
-                    ferieMaturate: 14.66,
-                    feriePrese: 0,
-                    rolMaturati: 3.33,
-                    rolPresi: 0,
-                    exFestMaturate: 2.67,
-                    exFestPrese: 0,
-                    ticketMaturati: 0,
-                    ticketSpesi: 0
-                });
-
-                curMese++;
-                if (curMese > 12) {
-                    curMese = 1;
-                    curAnno++;
-                }
-            }
-
-            dati.sort((a, b) => a.mese.localeCompare(b.mese));
-            salvaTuttiDati();
-        }
-    }
-
-    function impostaDataOggiInput() {
-        const oggi = new Date();
-        const anno = oggi.getFullYear();
-        const mese = String(oggi.getMonth() + 1).padStart(2, '0');
-        const giorno = String(oggi.getDate()).padStart(2, '0');
-        const dataOggi = `${anno}-${mese}-${giorno}`;
-
-        if (document.getElementById('inputFerieDataInizio')) document.getElementById('inputFerieDataInizio').value = dataOggi;
-        if (document.getElementById('inputFerieDataFine')) document.getElementById('inputFerieDataFine').value = dataOggi;
-        if (document.getElementById('inputMalattiaDataInizio')) document.getElementById('inputMalattiaDataInizio').value = dataOggi;
-        if (document.getElementById('inputMalattiaDataFine')) document.getElementById('inputMalattiaDataFine').value = dataOggi;
-        if (document.getElementById('inputTicketData')) document.getElementById('inputTicketData').value = dataOggi;
-    }
-
     function aggiornaSelettoriMese() {
         const selSpesa = document.getElementById('selectMeseSpesaTicket');
         if (!selSpesa) return;
-
-        const valSpesaPrec = selSpesa.value;
+        const valPrec = selSpesa.value;
         selSpesa.innerHTML = '';
-
         dati.forEach(item => {
             const opt = document.createElement('option');
             opt.value = item.mese;
             opt.innerText = formattaMeseAnno(item.mese);
             selSpesa.appendChild(opt);
         });
-
-        if (valSpesaPrec && dati.some(d => d.mese === valSpesaPrec)) {
-            selSpesa.value = valSpesaPrec;
+        if (valPrec && Array.from(selSpesa.options).some(o => o.value === valPrec)) {
+            selSpesa.value = valPrec;
         }
     }
 
     function formattaMeseAnno(meseStr) {
         if (!meseStr) return '';
         const [y, m] = meseStr.split('-');
-        const idx = parseInt(m, 10) - 1;
-        return `${NOMI_MESI[idx] || m} ${y}`;
+        return `${NOMI_MESI[parseInt(m, 10) - 1] || m} ${y}`;
     }
 
-    // Funzioni di rendering e gestione logica di base dell'applicazione
+    function impostaDataOggiInput() {
+        const oggi = new Date();
+        const dataOggi = `${oggi.getFullYear()}-${String(oggi.getMonth() + 1).padStart(2, '0')}-${String(oggi.getDate()).padStart(2, '0')}`;
+        ['inputFerieDataInizio', 'inputFerieDataFine', 'inputMalattiaDataInizio', 'inputMalattiaDataFine', 'inputTicketData'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.value = dataOggi;
+        });
+    }
+
     window.onload = function() {
         caricaDatiIniziali();
         sincronizzaAccreditiMensiliAutomatici();
-        popolaSelettoreMeseManuale();
         impostaDataOggiInput();
-        aggiornaSelettoriMese();
+        render();
     };
 </script>
 </body>
